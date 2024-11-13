@@ -77,32 +77,6 @@ const calculateFuelCost = (totalDistance) => {
   return fuelCost;
 };
 
-const branchAndBound = async (warehouses, customer, order) => {
-  let bestRoute = [];
-  let bestDistance = Infinity;
-
-  const remainingWarehouses = warehouses.filter(w => order.foods.some(f => w.products[f.title]));
-
-  const search = async (currentRoute, remainingWarehouses, totalDistance) => {
-    if (remainingWarehouses.length === 0) {
-      if (totalDistance < bestDistance) {
-        bestDistance = totalDistance;
-        bestRoute = [...currentRoute];
-      }
-      return;
-    }
-
-    for (const warehouse of remainingWarehouses) {
-      const distance = await calculateDistanceByRoad(warehouse.location, customer.location);
-      const newRoute = [...currentRoute, { from: warehouse, to: customer, distance }];
-      const newRemainingWarehouses = remainingWarehouses.filter(w => w.id !== warehouse.id);
-      await search(newRoute, newRemainingWarehouses, totalDistance + distance);
-    }
-  };
-
-  await search([], remainingWarehouses, 0);
-  return { route: bestRoute, totalDistance: bestDistance };
-};
 
 const buildRoute = async (order) => {
   const customer = customers.find(c => c.id === order.id);
