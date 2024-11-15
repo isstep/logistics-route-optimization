@@ -16,16 +16,44 @@ const logger = winston.createLogger({
   ],
 });
 
-const FUEL_PRICE = process.env.FUEL_PRICE || 2.20; // Цена за литр топлива
-const FUEL_CONSUMPTION_RATE = 8; // Расход топлива на 100 км
+const FUEL_PRICE = process.env.FUEL_PRICE || 2.20;
+const FUEL_CONSUMPTION_RATE = 8; 
 
 const warehouses = [
-  // Данные о складах
+  {
+    id: 1,
+    name: "Склад 1",
+    location: { lat: 53.9045, lng: 27.559 },
+    products: {
+      "Кофе молотый «Dallmayr» Prodomo": 10,
+      "Вафли «Спартак» Черноморские": 20,
+      "Крекер «Белогорье» Cristo Twisto": 15,
+    },
+  },
+  {
+    id: 2,
+    name: "Склад 2",
+    location: { lat: 53.906, lng: 27.545 },
+    products: {
+      "Мармелад жевательный «Бон Пари»": 30,
+      "Напиток газированный «Coca-Cola»": 50,
+    },
+  },
+  {
+    id: 3,
+    name: "Склад 3",
+    location: { lat: 53.91, lng: 27.557 },
+    products: {
+      "Набор конфет «Raffaello»": 20,
+      "Напиток газированный «Fanta»": 40,
+    },
+  },
 ];
 
 const customers = [
-  // Данные о клиентах
+  { id: 1, name: "Клиент 1", location: { lat: 53.901, lng: 27.558 } },
 ];
+
 
 const calculateDistanceByRoad = async (loc1, loc2) => {
   const osrmUrl = `http://router.project-osrm.org/route/v1/driving/${loc1.lng},${loc1.lat};${loc2.lng},${loc2.lat}?overview=false`;
