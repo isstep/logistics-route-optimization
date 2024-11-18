@@ -13,12 +13,37 @@
       button {
         padding: 10px 20px;
       }
+      input {
+        margin: 10px;
+      }
+      #addressSuggestions {
+        position: absolute;
+        background: white;
+        border: 1px solid #ccc;
+        max-height: 200px;
+        overflow-y: auto;
+        width: 300px;
+        z-index: 1000;
+      }
+      .suggestion {
+        padding: 8px;
+        cursor: pointer;
+      }
+      .suggestion:hover {
+        background-color: #f0f0f0;
+      }
     </style>
   </head>
-  
+
   <body>
     <h1>Обработка заказа</h1>
     <button id="processOrderBtn">Обработать заказ</button>
+    <br />
+    <label for="addressInput">Адрес точки:</label>
+    <input type="text" id="addressInput" placeholder="Введите адрес" />
+    <div id="addressSuggestions"></div>
+    <button id="addPointBtn">Добавить точку</button>
+
     <div id="map"></div>
     <pre id="result"></pre>
     <table id="resultTable" style="display: none">
@@ -34,145 +59,139 @@
 
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
     <script>
+      
       const map = L.map("map").setView([53.905, 27.558], 13);
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 19,
       }).addTo(map);
 
-      document.getElementById("processOrderBtn").onclick = () => {
-        const order = [
-          {
-            foods: [
-              {
-                id: 6,
-                title: "Кофе молотый «Dallmayr» Prodomo",
-                quantity: 1,
-                price: 13.97,
-              },
-              {
-                id: 5,
-                title: "Вафли «Спартак» Черноморские",
-                quantity: 1,
-                price: 4.78,
-              },
-              {
-                id: 11,
-                title: "Крекер «Белогорье» Cristo Twisto",
-                quantity: 4,
-                price: 4.99,
-              },
-              {
-                id: 1,
-                title: "Мармелад жевательный «Бон Пари»",
-                quantity: 3,
-                price: 2.71,
-              },
-              {
-                id: 13,
-                title: "Набор конфет «Raffaello»",
-                quantity: 1,
-                price: 8.11,
-              },
-              {
-                id: 29,
-                title: "Напиток газированный «Coca-Cola»",
-                quantity: 2,
-                price: 1.68,
-              },
-              {
-                id: 30,
-                title: "Напиток газированный «Fanta»",
-                quantity: 3,
-                price: 1.57,
-              },
-            ],
-            totalPrice: 60.02,
-            id: 1,
-          },
-        ];
+      let points = []; 
 
+    
+      function getRandomColor() {
+        const letters = "0123456789ABCDEF";
+        let color = "#";
+        for (let i = 0; i < 6; i++) {
+          color += letters[Math.floor(Math.random() * 16)];
+        }
+        return color;
+      }
+
+     
+      function geocodeAddress(address) {
+        return fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&addressdetails=1`)
+          .then(response => response.json())
+          .then(data => {
+            if (data.length > 0) {
+              return data.map(item => ({
+                address: item.display_name,
+                lat: parseFloat(item.lat),
+                lon: parseFloat(item.lon)
+              }));
+            } else {
+              throw new Error("Адрес не найден.");
+            }
+          });
+      }
+
+     
+      document.getElementById("addressInput").addEventListener("input", function() {
+        const query = this.value;
+        if (query.length < 3) {
+          document.getElementById("addressSuggestions").innerHTML = '';
+          return;
+        }
+
+        geocodeAddress(query)
+          .then(suggestions => {
+            const suggestionsList = document.getElementById("addressSuggestions");
+            suggestionsList.innerHTML = ''; 
+            suggestions.forEach(suggestion => {
+              const div = document.createElement("div");
+              div.classList.add("suggestion");
+              div.textContent = suggestion.address;
+              div.onclick = () => {
+                
+                addPoint(suggestion);
+                document.getElementById("addressInput").value = suggestion.address;
+                suggestionsList.innerHTML = ''; 
+              };
+              suggestionsList.appendChild(div);
+            });
+          })
+          .catch(error => {
+            console.error("Ошибка:", error);
+          });
+      });
+
+      
+      function addPoint(suggestion) {
+        const { lat, lon, address } = suggestion;
+        const newPoint = L.marker([lat, lon]).addTo(map);
+        newPoint.bindPopup(`Точка: ${address}`);
+        
+       
+        points.push({ address, lat, lon });
+      }
+
+      
+      document.getElementById("addPointBtn").onclick = () => {
+        const address = document.getElementById("addressInput").value;
+
+        if (!address) {
+          alert("Введите адрес.");
+          return;
+        }
+
+     
+        geocodeAddress(address)
+          .then(([point]) => {
+            addPoint(point);
+            document.getElementById("addressInput").value = ""; 
+          })
+          .catch(error => {
+            alert(error.message);
+          });
+      };
+
+      
+      document.getElementById("processOrderBtn").onclick = () => {
+        if (points.length === 0) {
+          alert("Добавьте хотя бы одну точку.");
+          return;
+        }
+
+       
         fetch("http://localhost:3000/process-order", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify(order),
+          body: JSON.stringify({ points }),
         })
           .then((response) => response.json())
           .then((data) => {
-            document.getElementById("result").innerText = JSON.stringify(
-              data,
-              null,
-              2
-            );
-            updateMap(data.route);
-            updateTable(data.route, data.totalDistance, data.fuelCost);
+            document.getElementById("result").innerText = JSON.stringify(data, null, 2);
+
+            const { route, totalDistance, fuelCost, geometry } = data;
+
+           
+            route.forEach(({ from, to, distance }) => {
+              const row = document.createElement("tr");
+              row.innerHTML = `<td>${from.name} → ${to.name}</td><td>${distance.toFixed(2)}</td>`;
+              document.getElementById("tableBody").appendChild(row);
+            });
+            document.getElementById("resultTable").style.display = "block";
+            document.getElementById("fuelCost").innerText = `Стоимость топлива: ${fuelCost.toFixed(2)} рублей`;
+
+        
+            const routeCoordinates = geometry.map(([lng, lat]) => [lat, lng]);
+            const randomColor = getRandomColor(); 
+            L.polyline(routeCoordinates, { color: randomColor }).addTo(map);
           })
-          .catch((error) => console.error("Ошибка:", error));
-      };
-
-      const updateMap = (route) => {
-        const latLngs = [];
-        route.forEach(({ from, to }, index) => {
-          L.marker([from.location.lat, from.location.lng])
-            .addTo(map)
-            .bindPopup(from.name);
-          latLngs.push([from.location.lat, from.location.lng]);
-
-          if (index === route.length - 1) {
-            L.marker([to.location.lat, to.location.lng])
-              .addTo(map)
-              .bindPopup(to.name);
-            latLngs.push([to.location.lat, to.location.lng]);
-          }
-        });
-
-        L.polyline(latLngs, { color: "green" }).addTo(map);
-        map.fitBounds(latLngs);
-      };
-
-      const updateTable = (route, totalDistance, fuelCost) => {
-        const tableBody = document.getElementById("tableBody");
-        tableBody.innerHTML = "";
-
-        route.forEach(({ from, to, distance }) => {
-          const row = document.createElement("tr");
-
-          const cell1 = document.createElement("td");
-          cell1.textContent = `${from.name} -> ${to.name}`;
-          row.appendChild(cell1);
-
-          const cell3 = document.createElement("td");
-          cell3.textContent = distance.toFixed(2);
-          row.appendChild(cell3);
-
-          tableBody.appendChild(row);
-        });
-
-        const totalRow = document.createElement("tr");
-        const totalCell = document.createElement("td");
-        totalCell.colSpan = 2;
-        totalCell.textContent = "Общее расстояние (км)";
-        totalRow.appendChild(totalCell);
-
-        const totalDistanceCell = document.createElement("td");
-        totalDistanceCell.textContent = totalDistance.toFixed(2);
-        totalRow.appendChild(totalDistanceCell);
-        tableBody.appendChild(totalRow);
-
-        const fuelCostRow = document.createElement("tr");
-        const fuelCostCell = document.createElement("td");
-        fuelCostCell.colSpan = 2;
-        fuelCostCell.textContent = "Стоимость бензина (BYN)";
-        fuelCostRow.appendChild(fuelCostCell);
-
-        const fuelCostCell2 = document.createElement("td");
-        fuelCostCell2.textContent = fuelCost.toFixed(2);
-        fuelCostRow.appendChild(fuelCostCell2);
-        tableBody.appendChild(fuelCostRow);
-
-        document.getElementById("resultTable").style.display = "block";
-        document.getElementById("fuelCost").textContent = `Стоимость бензина: ${fuelCost.toFixed(2)} BYN`;
+          .catch((error) => {
+            console.error("Ошибка:", error);
+          });
       };
     </script>
   </body>

@@ -19,129 +19,64 @@ const logger = winston.createLogger({
 const FUEL_PRICE = process.env.FUEL_PRICE || 2.20;
 const FUEL_CONSUMPTION_RATE = 8; 
 
-const warehouses = [
-  {
-    id: 1,
-    name: "Склад 1",
-    location: { lat: 53.9045, lng: 27.559 },
-    products: {
-      "Кофе молотый «Dallmayr» Prodomo": 10,
-      "Вафли «Спартак» Черноморские": 20,
-      "Крекер «Белогорье» Cristo Twisto": 15,
-    },
-  },
-  {
-    id: 2,
-    name: "Склад 2",
-    location: { lat: 53.906, lng: 27.545 },
-    products: {
-      "Мармелад жевательный «Бон Пари»": 30,
-      "Напиток газированный «Coca-Cola»": 50,
-    },
-  },
-  {
-    id: 3,
-    name: "Склад 3",
-    location: { lat: 53.91, lng: 27.557 },
-    products: {
-      "Набор конфет «Raffaello»": 20,
-      "Напиток газированный «Fanta»": 40,
-    },
-  },
-];
-
-const customers = [
-  { id: 1, name: "Клиент 1", location: { lat: 53.901, lng: 27.558 } },
-];
-
 
 const calculateDistanceByRoad = async (loc1, loc2) => {
-  const osrmUrl = `http://router.project-osrm.org/route/v1/driving/${loc1.lng},${loc1.lat};${loc2.lng},${loc2.lat}?overview=false`;
+  const osrmUrl = `http://router.project-osrm.org/route/v1/driving/${loc1.lon},${loc1.lat};${loc2.lon},${loc2.lat}?overview=full&geometries=geojson`;
   try {
     const response = await axios.get(osrmUrl);
-    const distanceInMeters = response.data.routes[0]?.distance;
-    return distanceInMeters ? distanceInMeters / 1000 : null;
+    const route = response.data.routes[0];
+    if (!route) {
+      throw new Error("Маршрут не найден.");
+    }
+    return {
+      distance: route.distance / 1000, 
+      geometry: route.geometry.coordinates, 
+    };
   } catch (error) {
     logger.error("Ошибка при получении данных маршрута:", error);
-    return null; // Возвращаем null для обработки отсутствия данных
+    return { distance: null, geometry: null };
   }
 };
+
 
 const calculateFuelCost = (totalDistance) => {
   const fuelRequired = (totalDistance / 100) * FUEL_CONSUMPTION_RATE;
   return fuelRequired * FUEL_PRICE;
 };
 
-const buildRoute = async (order) => {
-  const customer = customers.find((c) => c.id === order.id);
-  if (!customer) {
-    throw new Error(`Клиент с ID ${order.id} не найден.`);
-  }
 
+app.post("/process-order", async (req, res) => {
+  const { points } = req.body;
   let totalDistance = 0;
   const route = [];
-  const visitedWarehouses = new Set();
+  const geometry = [];
 
-  for (const food of order.foods) {
-    const warehouse = warehouses.find(
-      (w) => w.products[food.title] && w.products[food.title] >= food.quantity
-    );
 
-    if (!warehouse) {
-      throw new Error(`Продукт "${food.title}" отсутствует в достаточном количестве.`);
-    }
+  for (let i = 0; i < points.length - 1; i++) {
+    const fromPoint = points[i];
+    const toPoint = points[i + 1];
 
-    if (!visitedWarehouses.has(warehouse.id)) {
-      visitedWarehouses.add(warehouse.id);
-    }
-  }
-
-  const warehouseList = Array.from(visitedWarehouses).map((id) =>
-    warehouses.find((w) => w.id === id)
-  );
-
-  for (let i = 0; i < warehouseList.length; i++) {
-    const fromWarehouse = warehouseList[i];
-    const toLocation =
-      i === warehouseList.length - 1 ? customer.location : warehouseList[i + 1].location;
-
-    const distance = await calculateDistanceByRoad(fromWarehouse.location, toLocation);
+    const { distance, geometry: routeGeometry } = await calculateDistanceByRoad(fromPoint, toPoint);
 
     if (distance === null) {
-      throw new Error(`Не удалось рассчитать расстояние между ${fromWarehouse.name} и клиентом.`);
+      return res.status(400).json({ error: `Не удалось рассчитать расстояние между точками.` });
     }
 
     totalDistance += distance;
+    geometry.push(...routeGeometry);
 
     route.push({
-      from: { name: fromWarehouse.name, location: fromWarehouse.location },
-      to: {
-        name: i === warehouseList.length - 1 ? customer.name : warehouseList[i + 1].name,
-        location: toLocation,
-      },
+      from: { name: `Точка ${i + 1}`, location: fromPoint },
+      to: { name: `Точка ${i + 2}`, location: toPoint },
       distance,
     });
   }
 
   const fuelCost = calculateFuelCost(totalDistance);
 
-  return { route, totalDistance, fuelCost };
-};
-
-app.post("/process-order", async (req, res) => {
-  logger.info("Получен заказ:", req.body);
-
-  try {
-    const order = req.body[0];
-    const result = await buildRoute(order);
-    res.json(result);
-  } catch (error) {
-    logger.error("Ошибка при обработке заказа:", error.message);
-    res.status(400).json({ error: error.message });
-  }
+  res.json({ route, totalDistance, fuelCost, geometry });
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Сервер запущен на порту ${PORT}`);
+app.listen(3000, () => {
+  console.log("Сервер запущен на порту 3000");
 });
